@@ -1,16 +1,6 @@
 import logging
 import time
 import uuid
-
-from fastapi import FastAPI, Request
-
-from logging_config import setup_logging
-
-setup_logging()
-logger = logging.getLogger(__name__)
-
-app = FastAPI()
-
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -29,6 +19,48 @@ from routers.trade import router as trade_router
 
 setup_logging(settings.log_level)
 logger = logging.getLogger("uvicorn.error")
+
+tags_metadata = [
+    {
+        "name": "system",
+        "description": "Health, root, and protected internal service checks.",
+    },
+    {
+        "name": "market",
+        "description": "Market shortlist and related market data endpoints.",
+    },
+    {
+        "name": "scanner",
+        "description": "Scanner refresh and top movers workflows.",
+    },
+    {
+        "name": "trade",
+        "description": "Trade planning, execution, positions, and order endpoints.",
+    },
+]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("app_startup env=%s app=%s", settings.app_env, settings.app_name)
+    yield
+    logger.info("app_shutdown env=%s app=%s", settings.app_env, settings.app_name)
+
+
+app = FastAPI(
+    title=settings.app_name,
+    description=(
+        "FastAPI service for health checks, market shortlist workflows, "
+        "scanner refresh, and protected internal operations."
+    ),
+    version="1.0.0",
+    lifespan=lifespan,
+    openapi_tags=tags_metadata,
+)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.middleware("http")
@@ -70,29 +102,32 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("app_startup env=%s app=%s", settings.app_env, settings.app_name)
-    yield
-    logger.info("app_shutdown env=%s app=%s", settings.app_env, settings.app_name)
-
-
-app = FastAPI(
-    title=settings.app_name,
-    lifespan=lifespan,
-)
-
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
-
 app.include_router(status_router)
 app.include_router(market_router)
 app.include_router(scanner_router)
 app.include_router(trade_router)
 
 
-@app.get("/")
+@app.get(
+    "/",
+    tags=["system"],
+    summary="Root status",
+    description="Returns basic application identity and environment information.",
+    responses={
+        200: {
+            "description": "Basic application status",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "name": "BingX Shortlist API",
+                        "env": "prod",
+                        "status": "ok",
+                    }
+                }
+            },
+        }
+    },
+)
 @limiter.limit("30/minute")
 async def root(request: Request):
     return {
@@ -102,9 +137,42 @@ async def root(request: Request):
     }
 
 
-@app.get("/status/private")
+@app.get(
+    "/status/private",
+    tags=["system"],
+    summary="Private status check",
+    description="Returns internal service status. Requires a valid x-api-key header.",
+    responses={
+        200: {
+            "description": "Authorized internal status response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "name": "BingX Shortlist API",
+                        "env": "prod",
+                        "status": "ok",
+                        "access": "private",
+                    }
+                }
+            },
+        },
+        401: {
+            "description": "Missing or invalid API key",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Unauthorized"
+                    }
+                }
+            },
+        },
+    },
+)
 @limiter.limit("10/minute")
-async def private_status(request: Request, _: str = Depends(require_internal_api_key)):
+async def private_status(
+    request: Request,
+    _: str = Depends(require_internal_api_key),
+):
     return {
         "name": settings.app_name,
         "env": settings.app_env,
