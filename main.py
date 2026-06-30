@@ -1,4 +1,16 @@
 import logging
+import time
+import uuid
+
+from fastapi import FastAPI, Request
+
+from logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -17,6 +29,45 @@ from routers.trade import router as trade_router
 
 setup_logging(settings.log_level)
 logger = logging.getLogger("uvicorn.error")
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.perf_counter()
+
+    logger.info(
+        "request_started request_id=%s method=%s path=%s client=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        request.client.host if request.client else "unknown",
+    )
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "request_failed request_id=%s method=%s path=%s",
+            request_id,
+            request.method,
+            request.url.path,
+        )
+        raise
+
+    process_time_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+    logger.info(
+        "request_completed request_id=%s method=%s path=%s status_code=%s duration_ms=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        process_time_ms,
+    )
+
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @asynccontextmanager
