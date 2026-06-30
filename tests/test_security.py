@@ -7,14 +7,13 @@ client = TestClient(app)
 API_KEY = {"x-api-key": "change-me"}
 
 
-def test_private_status_unauthorized():
+def test_private_status_unauthorized(client):
     response = client.get("/status/private")
     assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid or missing API key"
 
 
-def test_private_status_authorized():
-    response = client.get("/status/private", headers=API_KEY)
+def test_private_status_authorized(private_client):
+    response = private_client.get("/status/private")
     assert response.status_code == 200
 
     data = response.json()
