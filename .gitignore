@@ -1,0 +1,23 @@
+# Env files
+.env
+.env.*
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Virtual env
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
