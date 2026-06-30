@@ -16,6 +16,7 @@ from schemas.trade import (
     TradePlanResponse,
     TradePreviewQuery,
     TradePreviewResponse,
+    ExecutionLogResponse,
 )
 from services.trade_service import (
     build_close_position,
@@ -25,6 +26,7 @@ from services.trade_service import (
     build_positions,
     build_trade_plan,
     build_trade_preview,
+    get_execution_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,26 @@ async def trade_plan(
             str(exc),
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/executions",
+    response_model=ExecutionLogResponse,
+    dependencies=[Depends(require_internal_api_key_only_in_security_tests)],
+    summary="Get recent execution log entries",
+    description=(
+        "Returns recent live and dry-run execution entries for internal audit/debug workflows. "
+        "Requires internal API key access."
+    ),
+)
+async def trade_executions(
+    limit: int = Query(default=100, ge=1, le=500),
+) -> ExecutionLogResponse:
+    logger.info("trade_executions_requested limit=%s", limit)
+    items = get_execution_log(limit=limit)
+    logger.info("trade_executions_loaded limit=%s items_count=%s", limit, len(items))
+    return ExecutionLogResponse(items=items)
+
 
 
 @router.get("/preview", response_model=TradePreviewResponse)

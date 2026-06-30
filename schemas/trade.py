@@ -2,6 +2,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from typing import Any
+from pydantic import BaseModel
 
 AllowedInterval = Literal["5m", "15m", "1h"]
 
@@ -205,3 +207,15 @@ class OpenOrderItem(BaseModel):
 class OpenOrdersResponse(BaseModel):
     exchange: str
     items: list[OpenOrderItem]
+
+class ExecutionLogEntry(BaseModel):
+        exchange: str
+        live_sent: bool
+        status: str
+        idempotency_key: str | None = None
+        message: str
+        attempt: dict[str, Any]
+        exchange_response: Any | None = None
+
+class ExecutionLogResponse(BaseModel):
+        items: list[ExecutionLogEntry]

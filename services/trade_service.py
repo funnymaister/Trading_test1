@@ -22,6 +22,11 @@ def _append_execution_log(entry: dict[str, Any]) -> None:
     if len(_EXECUTION_LOG) > 500:
         del _EXECUTION_LOG[:-500]
 
+def get_execution_log(limit: int = 100) -> list[dict[str, Any]]:
+            if limit <= 0:
+                limit = 1
+            return _EXECUTION_LOG[-limit:]
+
 
 async def fetch_signal(query) -> Any:
     class _SignalData:
@@ -168,6 +173,12 @@ async def build_trade_preview(query: TradePreviewQuery) -> dict[str, Any]:
     stop_loss = float(data["stop_loss"])
     risk_per_unit = abs(entry_price - stop_loss)
 
+    if entry_price <= 0:
+        raise ValueError("Invalid entry price for trade preview")
+
+    if stop_loss <= 0:
+        raise ValueError("Invalid stop loss for trade preview")
+
     if risk_per_unit <= 0:
         raise ValueError("Invalid risk per unit for trade preview")
 
@@ -175,10 +186,19 @@ async def build_trade_preview(query: TradePreviewQuery) -> dict[str, Any]:
     position_size_units = round(risk_amount_usdt / risk_per_unit, 6)
 
     if position_size_units <= 0:
-        raise ValueError("Invalid risk per unit for trade preview")
+        raise ValueError("Invalid position size for trade preview")
 
     position_notional_usdt = round(position_size_units * entry_price, 4)
     required_margin_usdt = round(position_notional_usdt / query.leverage, 4)
+
+    if position_notional_usdt <= 0:
+        raise ValueError("Invalid position notional for trade preview")
+
+    if required_margin_usdt <= 0:
+        raise ValueError("Invalid required margin for trade preview")
+
+    if required_margin_usdt > query.account_balance:
+        raise ValueError("Required margin exceeds account balance")
 
     return {
         "exchange": "BingX",
@@ -278,10 +298,20 @@ async def build_execute_live(query: TradeExecuteQuery) -> dict[str, Any]:
     data = preview["data"]
     attempt = _build_execution_attempt(data)
 
+    if attempt["side"] not in {"buy", "sell"}:
+        raise ValueError("Invalid trade side for live execution")
+
+    if float(attempt["quantity"]) <= 0:
+        raise ValueError("Invalid quantity for live execution")
+
+    if int(attempt["leverage"]) < 1:
+        raise ValueError("Invalid leverage for live execution")
+
     live_sent = bool(settings.enable_live_bingx)
+    exchange_response: Any | None = None
 
     if live_sent:
-        await bingx_execution_service.place_market_order(
+        exchange_response = await bingx_execution_service.place_market_order(
             symbol=attempt["symbol"],
             side=attempt["side"],
             quantity=attempt["quantity"],
@@ -299,6 +329,7 @@ async def build_execute_live(query: TradeExecuteQuery) -> dict[str, Any]:
             else "Execution accepted in skeleton mode. No live order was sent."
         ),
         "attempt": attempt,
+        "exchange_response": exchange_response,
     }
 
     _EXECUTION_STORE[query.idempotency_key] = {
