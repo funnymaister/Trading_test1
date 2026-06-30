@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from core.security import require_internal_api_key_only_in_security_tests
 from schemas.scanner import TopMoversResponse
 from services.scanner_service import get_top_movers, refresh_top_movers
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scanner", tags=["scanner"])
 
@@ -52,9 +56,20 @@ router = APIRouter(prefix="/scanner", tags=["scanner"])
     },
 )
 async def scanner_top_movers_refresh() -> TopMoversResponse:
+    logger.info("scanner_top_movers_refresh_requested")
     try:
-        return await refresh_top_movers()
+        result = await refresh_top_movers()
+        items_count = len(result.items) if hasattr(result, "items") else "unknown"
+        logger.info(
+            "scanner_top_movers_refresh_completed items_count=%s",
+            items_count,
+        )
+        return result
     except ValueError as exc:
+        logger.warning(
+            "scanner_top_movers_refresh_invalid detail=%s",
+            str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -92,7 +107,18 @@ async def scanner_top_movers_refresh() -> TopMoversResponse:
     },
 )
 async def scanner_top_movers() -> TopMoversResponse:
+    logger.info("scanner_top_movers_requested")
     try:
-        return await get_top_movers()
+        result = await get_top_movers()
+        items_count = len(result.items) if hasattr(result, "items") else "unknown"
+        logger.info(
+            "scanner_top_movers_loaded items_count=%s",
+            items_count,
+        )
+        return result
     except ValueError as exc:
+        logger.warning(
+            "scanner_top_movers_invalid detail=%s",
+            str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc

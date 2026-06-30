@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
@@ -29,6 +30,8 @@ from services.market_service import (
     fetch_tickers_24h,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/market", tags=["market"])
 
 
@@ -48,6 +51,7 @@ router = APIRouter(prefix="/market", tags=["market"])
     },
 )
 async def market_health() -> dict[str, str]:
+    logger.info("market_health_requested")
     return {"status": "ok"}
 
 
@@ -63,13 +67,27 @@ async def market_candidates(
     candles_limit: Annotated[int, Query(ge=50, le=1000, description="Number of candles used for calculations.")] = 200,
     top_k: Annotated[int, Query(ge=1, le=20, description="Number of top-ranked candidates to return.")] = 5,
 ) -> CandidatesResponse:
+    logger.info(
+        "market_candidates_requested interval=%s limit=%s candles_limit=%s top_k=%s",
+        interval,
+        limit,
+        candles_limit,
+        top_k,
+    )
     query = CandidatesQuery(
         interval=interval,
         limit=limit,
         candles_limit=candles_limit,
         top_k=top_k,
     )
-    return await fetch_candidates(query)
+    result = await fetch_candidates(query)
+    items_count = len(result.items) if hasattr(result, "items") else "unknown"
+    logger.info(
+        "market_candidates_loaded interval=%s items_count=%s",
+        interval,
+        items_count,
+    )
+    return result
 
 
 @router.get(
@@ -83,12 +101,24 @@ async def market_signals(
     interval: Literal["5m", "15m", "1h"] = Query(default="5m", description="Signal timeframe."),
     limit: Annotated[int, Query(ge=50, le=1000, description="Number of candles used to compute the signal.")] = 200,
 ) -> SignalResponse:
+    logger.info(
+        "market_signal_requested symbol=%s interval=%s limit=%s",
+        symbol,
+        interval,
+        limit,
+    )
     query = SignalQuery(
         symbol=symbol,
         interval=interval,
         limit=limit,
     )
-    return await fetch_signal(query)
+    result = await fetch_signal(query)
+    logger.info(
+        "market_signal_loaded symbol=%s interval=%s",
+        symbol,
+        interval,
+    )
+    return result
 
 
 @router.get(
@@ -102,12 +132,24 @@ async def market_candles(
     interval: Literal["5m", "15m", "1h"] = Query(default="5m", description="Candlestick timeframe."),
     limit: Annotated[int, Query(ge=1, le=500, description="Maximum number of candles to return.")] = 100,
 ) -> CandlesResponse:
+    logger.info(
+        "market_candles_requested symbol=%s interval=%s limit=%s",
+        symbol,
+        interval,
+        limit,
+    )
     query = CandlesQuery(
         symbol=symbol,
         interval=interval,
         limit=limit,
     )
-    return await fetch_candles(query)
+    result = await fetch_candles(query)
+    logger.info(
+        "market_candles_loaded symbol=%s interval=%s",
+        symbol,
+        interval,
+    )
+    return result
 
 
 @router.get(
@@ -121,12 +163,24 @@ async def market_indicators(
     interval: Literal["5m", "15m", "1h"] = Query(default="5m", description="Indicator timeframe."),
     limit: Annotated[int, Query(ge=50, le=1000, description="Number of candles used for indicator calculations.")] = 200,
 ) -> IndicatorsResponse:
+    logger.info(
+        "market_indicators_requested symbol=%s interval=%s limit=%s",
+        symbol,
+        interval,
+        limit,
+    )
     query = IndicatorsQuery(
         symbol=symbol,
         interval=interval,
         limit=limit,
     )
-    return await fetch_indicators(query)
+    result = await fetch_indicators(query)
+    logger.info(
+        "market_indicators_loaded symbol=%s interval=%s",
+        symbol,
+        interval,
+    )
+    return result
 
 
 @router.get(
@@ -161,6 +215,14 @@ async def get_shortlist(
     min_notional: Annotated[float | None, Query(ge=0, description="Optional minimum notional filter.")] = None,
     limit: Annotated[int, Query(ge=1, le=200, description="Maximum number of shortlisted contracts to return.")] = 30,
 ) -> ShortlistResponse:
+    logger.info(
+        "market_shortlist_requested quote_asset=%s only_trading=%s only_api_trading=%s min_notional=%s limit=%s",
+        quote_asset,
+        only_trading,
+        only_api_trading,
+        min_notional,
+        limit,
+    )
     query = ShortlistQuery(
         quote_asset=quote_asset,
         only_trading=only_trading,
@@ -169,7 +231,14 @@ async def get_shortlist(
         limit=limit,
     )
     contracts = await fetch_contracts()
-    return build_shortlist(contracts, query)
+    result = build_shortlist(contracts, query)
+    items_count = len(result.items) if hasattr(result, "items") else "unknown"
+    logger.info(
+        "market_shortlist_built quote_asset=%s items_count=%s",
+        quote_asset,
+        items_count,
+    )
+    return result
 
 
 @router.get(
@@ -183,10 +252,24 @@ async def market_movers(
     limit: int = Query(default=20, ge=1, le=100, description="Maximum number of movers to return."),
     sort: str = Query(default="gainers", description="Sorting mode, for example gainers."),
 ) -> MoversResponse:
+    logger.info(
+        "market_movers_requested quote_asset=%s limit=%s sort=%s",
+        quote_asset,
+        limit,
+        sort,
+    )
     query = MoversQuery(
         quote_asset=quote_asset,
         limit=limit,
         sort=sort,
     )
     tickers = await fetch_tickers_24h()
-    return build_movers(tickers, query)
+    result = build_movers(tickers, query)
+    items_count = len(result.items) if hasattr(result, "items") else "unknown"
+    logger.info(
+        "market_movers_built quote_asset=%s sort=%s items_count=%s",
+        quote_asset,
+        sort,
+        items_count,
+    )
+    return result
