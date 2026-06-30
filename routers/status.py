@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from core.settings import settings
 
@@ -6,7 +6,7 @@ router = APIRouter(tags=["status"])
 
 
 @router.get("/health")
-async def health():
+async def health(request: Request):
     return {
         "status": "ok",
         "env": settings.app_env,
@@ -15,7 +15,7 @@ async def health():
 
 
 @router.get("/status")
-async def status():
+async def status(request: Request):
     return {
         "status": "ok",
         "env": settings.app_env,

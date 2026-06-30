@@ -1,6 +1,8 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from core.limiter import limiter
+
+from fastapi import APIRouter, Query, Request
 
 from schemas.market import (
     CandidateItem,
@@ -43,6 +45,11 @@ from schemas.market import (
 
 router = APIRouter(prefix="/market", tags=["market"])
 
+
+@router.get("/market/shortlist")
+@limiter.limit("10/minute")
+async def get_shortlist(request: Request):
+    ...
 
 @router.get("/candidates", response_model=CandidatesResponse)
 async def market_candidates(
