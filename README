@@ -1,0 +1,124 @@
+# BingX Shortlist API
+
+Небольшой FastAPI-сервис для получения shortlist торговых контрактов BingX с фильтрацией по quote asset, торговому статусу, API-доступности и минимальному notional.
+
+## Возможности
+
+- FastAPI API с `/docs`
+- Health-check endpoint
+- Shortlist endpoint с query-параметрами
+- Тесты на `pytest`
+- Mock-тесты без зависимости от реального BingX API
+
+## Стек
+
+- Python
+- FastAPI
+- Uvicorn
+- Pydantic
+- HTTPX
+- Pytest
+
+## Структура проекта
+
+```text
+bingx-shortlist-api/
+├── routers/
+├── schemas/
+├── services/
+├── tests/
+├── config.py
+├── main.py
+├── requirements.txt
+├── run.ps1
+└── smoke_test.py
+```
+
+## Установка
+
+Создай и активируй виртуальное окружение, затем установи зависимости:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+## Запуск
+
+Из корня проекта:
+
+```powershell
+python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+После запуска открой:
+
+- Swagger UI: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- ReDoc: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+
+## Endpoint'ы
+
+### `GET /market/health`
+
+Проверка, что сервис поднят.
+
+Пример ответа:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### `GET /market/shortlist`
+
+Возвращает shortlist контрактов BingX.
+
+#### Query-параметры
+
+- `quote_asset` — например `USDT` или `USDC`
+- `only_trading` — фильтр только активных торговых инструментов
+- `only_api_trading` — фильтр только доступных для API buy/sell
+- `min_notional` — минимальный notional
+- `limit` — ограничение числа элементов
+
+#### Пример запроса
+
+```text
+/market/shortlist?quote_asset=USDT&limit=10
+```
+
+## Тесты
+
+Запуск тестов:
+
+```powershell
+python -m pytest tests -q
+```
+
+## Smoke test
+
+После запуска сервера можно выполнить:
+
+```powershell
+python smoke_test.py
+```
+
+Скрипт проверяет:
+- `/market/health`
+- `/market/shortlist`
+
+## Примечания
+
+- Для локальной разработки используй `.env`
+- В тестах используется mock, чтобы не зависеть от внешнего BingX API
+- Публичный ответ API очищен от внутренних сырых полей
+
+## Дальше можно улучшить
+
+- Добавить сортировку shortlist
+- Добавить логирование ошибок внешнего API
+- Добавить GitHub Actions для автозапуска тестов
+- Добавить Docker Compose для локального запуска
