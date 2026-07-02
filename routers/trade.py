@@ -17,7 +17,16 @@ from schemas.trade import (
     TradePreviewQuery,
     TradePreviewResponse,
     ExecutionLogResponse,
+    TradeDecisionResponse,
+    TradeDecisionExecuteQuery,
+    TrailingStopPreviewQuery,
+    TrailingStopPreviewResponse,
+    PartialClosePreviewQuery,
+    PartialClosePreviewResponse,
+    BreakevenPreviewQuery,
+    BreakevenPreviewResponse,
 )
+
 from services.trade_service import (
     build_close_position,
     build_execute_dry_run,
@@ -27,11 +36,32 @@ from services.trade_service import (
     build_trade_plan,
     build_trade_preview,
     get_execution_log,
+    build_trailing_stop_preview,
+    build_partial_close_preview,
+    build_breakeven_preview,
 )
+
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/trade", tags=["trade"])
+
+
+@router.post("/breakeven/preview", response_model=BreakevenPreviewResponse)
+async def breakeven_preview(query: BreakevenPreviewQuery):
+    try:
+        return await build_breakeven_preview(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+
+@router.post("/partial-close/preview", response_model=PartialClosePreviewResponse)
+async def partial_close_preview(query: PartialClosePreviewQuery):
+    try:
+        return await build_partial_close_preview(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/plan", response_model=TradePlanResponse)
@@ -184,6 +214,8 @@ async def trade_execute_dry_run(
             str(exc),
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 
 
 @router.post(
@@ -343,3 +375,180 @@ async def trade_close_position(
             str(exc),
         )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/decision", response_model=TradeDecisionResponse)
+async def trade_decision(
+    symbol: str = Query(..., min_length=3, max_length=30),
+    interval: AllowedInterval = Query(default="5m"),
+    candles_limit: int = Query(default=200, ge=50, le=1000),
+    rr_target: float = Query(default=2.0, ge=1.0, le=10.0),
+    account_balance: float = Query(default=1000.0, ge=10.0, le=1_000_000.0),
+    risk_percent: float = Query(default=1.0, ge=0.1, le=5.0),
+    leverage: int = Query(default=5, ge=1, le=50),
+):
+    logger.info(
+        "trade_decision_requested symbol=%s interval=%s candles_limit=%s rr_target=%s risk_percent=%s leverage=%s",
+        symbol,
+        interval,
+        candles_limit,
+        rr_target,
+        risk_percent,
+        leverage,
+    )
+    try:
+        plan_query = TradePlanQuery(
+            symbol=symbol,
+            interval=interval,
+            candles_limit=candles_limit,
+            rr_target=rr_target,
+        )
+        preview_query = TradePreviewQuery(
+            symbol=symbol,
+            interval=interval,
+            candles_limit=candles_limit,
+            rr_target=rr_target,
+            account_balance=account_balance,
+            risk_percent=risk_percent,
+            leverage=leverage,
+        )
+
+        plan = await build_trade_plan(plan_query)
+        preview = await build_trade_preview(preview_query)
+
+        logger.info(
+            "trade_decision_built symbol=%s interval=%s",
+            symbol,
+            interval,
+        )
+
+        return {
+            "exchange": "BingX",
+            "data": {
+                "plan": plan.get("data", plan),
+                "preview": preview.get("data", preview),
+            },
+        }
+    except ValueError as exc:
+        logger.warning(
+            "trade_decision_invalid symbol=%s interval=%s detail=%s",
+            symbol,
+            interval,
+            str(exc),
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/decision/execute",
+    dependencies=[Depends(require_internal_api_key_only_in_security_tests)],
+    summary="Build trade decision and execute (dry-run or live)",
+    description=(
+        "Orchestrates trade plan, preview, and execution in a single call. "
+        "Uses dry-run by default; live execution requires confirm_live=true."
+    ),
+)
+async def trade_decision_execute(
+    payload: TradeDecisionExecuteQuery = Body(...),
+):
+    logger.info(
+        "trade_decision_execute_requested symbol=%s interval=%s candles_limit=%s rr_target=%s "
+        "risk_percent=%s leverage=%s dry_run=%s confirm_live=%s idempotency_key=%s",
+        payload.symbol,
+        payload.interval,
+        payload.candles_limit,
+        payload.rr_target,
+        payload.risk_percent,
+        payload.leverage,
+        payload.dry_run,
+        payload.confirm_live,
+        payload.idempotency_key,
+    )
+    try:
+        plan_query = TradePlanQuery(
+            symbol=payload.symbol,
+            interval=payload.interval,
+            candles_limit=payload.candles_limit,
+            rr_target=payload.rr_target,
+        )
+        preview_query = TradePreviewQuery(
+            symbol=payload.symbol,
+            interval=payload.interval,
+            candles_limit=payload.candles_limit,
+            rr_target=payload.rr_target,
+            account_balance=payload.account_balance,
+            risk_percent=payload.risk_percent,
+            leverage=payload.leverage,
+        )
+
+        plan = await build_trade_plan(plan_query)
+        preview = await build_trade_preview(preview_query)
+
+        if payload.dry_run or not payload.confirm_live:
+            # Dry-run execution
+            dry_run_result = await build_execute_dry_run(preview_query)
+            logger.info(
+                "trade_decision_execute_dry_run_completed symbol=%s interval=%s idempotency_key=%s",
+                payload.symbol,
+                payload.interval,
+                payload.idempotency_key,
+            )
+            return {
+                "exchange": "BingX",
+                "mode": "dry_run",
+                "plan": plan.get("data", plan),
+                "preview": preview.get("data", preview),
+                "execution": dry_run_result,
+            }
+
+        # Live execution
+        live_query = TradeExecuteQuery(
+            symbol=payload.symbol,
+            interval=payload.interval,
+            candles_limit=payload.candles_limit,
+            rr_target=payload.rr_target,
+            account_balance=payload.account_balance,
+            risk_percent=payload.risk_percent,
+            leverage=payload.leverage,
+            idempotency_key=payload.idempotency_key,
+            confirm_live=payload.confirm_live,
+        )
+
+        live_result = await build_execute_live(live_query)
+        logger.info(
+            "trade_decision_execute_live_completed symbol=%s interval=%s idempotency_key=%s",
+            payload.symbol,
+            payload.interval,
+            payload.idempotency_key,
+        )
+
+        return {
+            "exchange": "BingX",
+            "mode": "live",
+            "plan": plan.get("data", plan),
+            "preview": preview.get("data", preview),
+            "execution": live_result,
+        }
+    except ValueError as exc:
+        logger.warning(
+            "trade_decision_execute_invalid symbol=%s interval=%s detail=%s",
+            payload.symbol,
+            payload.interval,
+            str(exc),
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/preview", response_model=TradePreviewResponse)
+async def trade_preview(query: TradePreviewQuery):
+    try:
+        return await build_trade_preview(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@router.post("/trailing-stop/preview", response_model=TrailingStopPreviewResponse)
+async def trailing_stop_preview(query: TrailingStopPreviewQuery):
+    try:
+        return await build_trailing_stop_preview(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

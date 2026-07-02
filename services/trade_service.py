@@ -421,6 +421,130 @@ async def build_open_orders(symbol: str | None = None) -> Any:
     }
 
 
+
+async def build_breakeven_preview(query):
+    side = query.side.lower()
+    entry_price = float(query.entry_price)
+    current_price = float(query.current_price)
+    current_stop_loss = float(query.current_stop_loss)
+    activation_rr = float(query.activation_rr)
+    risk_per_unit = float(query.risk_per_unit)
+    buffer_percent = float(query.buffer_percent)
+
+    if side not in {"buy", "sell"}:
+        raise ValueError("Invalid trade side")
+
+    if side == "buy":
+        activation_price = entry_price + (risk_per_unit * activation_rr)
+        if current_price < activation_price:
+            raise ValueError("Breakeven not activated yet")
+
+        proposed_stop_loss = entry_price * (1 + buffer_percent / 100)
+        should_update = proposed_stop_loss > current_stop_loss
+    else:
+        activation_price = entry_price - (risk_per_unit * activation_rr)
+        if current_price > activation_price:
+            raise ValueError("Breakeven not activated yet")
+
+        proposed_stop_loss = entry_price * (1 - buffer_percent / 100)
+        should_update = proposed_stop_loss < current_stop_loss
+
+    return {
+        "exchange": "BingX",
+        "data": {
+            "symbol": query.symbol,
+            "side": side,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "current_stop_loss": current_stop_loss,
+            "activation_rr": activation_rr,
+            "risk_per_unit": risk_per_unit,
+            "buffer_percent": buffer_percent,
+            "activation_price": round(activation_price, 4),
+            "activated": True,
+            "proposed_stop_loss": round(proposed_stop_loss, 4),
+            "should_update": should_update,
+            "reason": "Breakeven stop recalculated after activation threshold was reached",
+        },
+    }
+
+
+
+async def build_trailing_stop_preview(query):
+    side = query.side.lower()
+    entry_price = float(query.entry_price)
+    current_price = float(query.current_price)
+    current_stop_loss = float(query.current_stop_loss)
+    trail_distance_percent = float(query.trail_distance_percent)
+    activation_percent = float(query.activation_percent)
+
+    if side not in {"buy", "sell"}:
+        raise ValueError("Invalid trade side")
+
+    if side == "buy":
+        activation_price = entry_price * (1 + activation_percent / 100)
+        if current_price < activation_price:
+            raise ValueError("Trailing stop not activated yet")
+
+        proposed_stop_loss = current_price * (1 - trail_distance_percent / 100)
+        should_update = proposed_stop_loss > current_stop_loss
+    else:
+        activation_price = entry_price * (1 - activation_percent / 100)
+        if current_price > activation_price:
+            raise ValueError("Trailing stop not activated yet")
+
+        proposed_stop_loss = current_price * (1 + trail_distance_percent / 100)
+        should_update = proposed_stop_loss < current_stop_loss
+
+    return {
+        "exchange": "BingX",
+        "data": {
+            "symbol": query.symbol,
+            "side": side,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "current_stop_loss": current_stop_loss,
+            "trail_distance_percent": trail_distance_percent,
+            "activation_percent": activation_percent,
+            "activated": True,
+            "proposed_stop_loss": round(proposed_stop_loss, 4),
+            "should_update": should_update,
+            "reason": "Trailing stop activated and recalculated from current price",
+        },
+    }
+
+
+async def build_partial_close_preview(query):
+    side = query.side.lower()
+    position_size_units = float(query.position_size_units)
+    current_price = float(query.current_price)
+    close_percent = float(query.close_percent)
+
+    if side not in {"buy", "sell"}:
+        raise ValueError("Invalid trade side")
+
+    close_size_units = position_size_units * (close_percent / 100)
+    remaining_size_units = position_size_units - close_size_units
+    close_notional_usdt = close_size_units * current_price
+    remaining_notional_usdt = remaining_size_units * current_price
+
+    return {
+        "exchange": "BingX",
+        "data": {
+            "symbol": query.symbol,
+            "side": side,
+            "position_size_units": round(position_size_units, 6),
+            "current_price": current_price,
+            "close_percent": close_percent,
+            "close_size_units": round(close_size_units, 6),
+            "remaining_size_units": round(remaining_size_units, 6),
+            "close_notional_usdt": round(close_notional_usdt, 2),
+            "remaining_notional_usdt": round(remaining_notional_usdt, 2),
+            "reason": "Partial close preview calculated from current position size and requested close percentage",
+        },
+    }
+
+
 async def build_close_position(query: ClosePositionQuery) -> dict[str, Any]:
     if not query.confirm_close:
         raise ValueError("Closing a position requires confirm_close=true")

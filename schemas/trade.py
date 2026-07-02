@@ -3,9 +3,50 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from typing import Any
-from pydantic import BaseModel
 
 AllowedInterval = Literal["5m", "15m", "1h"]
+
+
+class BreakevenPreviewQuery(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    side: str = Field(..., pattern="^(buy|sell)$")
+    entry_price: float = Field(..., gt=0)
+    current_price: float = Field(..., gt=0)
+    current_stop_loss: float = Field(..., gt=0)
+    activation_rr: float = Field(..., gt=0, le=10)
+    risk_per_unit: float = Field(..., gt=0)
+    buffer_percent: float = Field(0.0, ge=0, le=5)
+
+
+class BreakevenPreviewResponse(BaseModel):
+    exchange: str
+    data: dict
+
+class PartialClosePreviewQuery(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    side: str = Field(..., pattern="^(buy|sell)$")
+    position_size_units: float = Field(..., gt=0)
+    current_price: float = Field(..., gt=0)
+    close_percent: float = Field(..., gt=0, le=100)
+
+
+class PartialClosePreviewResponse(BaseModel):
+    exchange: str
+    data: dict
+
+class TradePreviewQuery(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    interval: str = Field(..., pattern="^(1m|5m|15m|1h|4h|1d)$")
+    candles_limit: int = Field(..., ge=50, le=1000)
+    rr_target: float = Field(..., ge=1.0, le=10.0)
+    account_balance: float = Field(..., gt=0)
+    risk_percent: float = Field(..., gt=0, le=100)
+    leverage: int = Field(..., ge=1, le=125)
+
+
+class TradePreviewResponse(BaseModel):
+    exchange: str
+    data: dict
 
 
 class TradePlanQuery(BaseModel):
@@ -219,3 +260,40 @@ class ExecutionLogEntry(BaseModel):
 
 class ExecutionLogResponse(BaseModel):
         items: list[ExecutionLogEntry]
+
+
+
+class TradeDecisionData(BaseModel):
+            plan: dict[str, Any]
+            preview: dict[str, Any]
+
+class TradeDecisionResponse(BaseModel):
+            exchange: str
+            data: TradeDecisionData
+
+class TradeDecisionExecuteQuery(BaseModel):
+                symbol: str
+                interval: AllowedInterval
+                candles_limit: int
+                rr_target: float
+                account_balance: float
+                risk_percent: float
+                leverage: int
+                idempotency_key: str
+                confirm_live: bool = False
+                dry_run: bool = True
+
+
+class TrailingStopPreviewQuery(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    side: str = Field(..., pattern="^(buy|sell)$")
+    entry_price: float = Field(..., gt=0)
+    current_price: float = Field(..., gt=0)
+    current_stop_loss: float = Field(..., gt=0)
+    trail_distance_percent: float = Field(..., gt=0, le=20)
+    activation_percent: float = Field(..., ge=0, le=20)
+
+
+class TrailingStopPreviewResponse(BaseModel):
+    exchange: str
+    data: dict
