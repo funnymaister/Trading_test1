@@ -2,10 +2,95 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from typing import Any
+from typing import Any, Literal
 
 AllowedInterval = Literal["5m", "15m", "1h"]
 
+
+class TradeJournalEntryResponse(BaseModel):
+    exchange: str
+    data: dict
+
+
+class TradeJournalListResponse(BaseModel):
+    exchange: str
+    count: int
+    data: list[dict]
+
+class TradeJournalSaveQuery(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    side: str = Field(..., pattern="^(buy|sell)$")
+    outcome: Literal["win", "loss", "breakeven"]
+    entry_price: float = Field(..., gt=0)
+    stop_loss: float = Field(..., gt=0)
+    take_profit: float = Field(..., gt=0)
+    exit_price: float = Field(..., gt=0)
+    position_size_units: float = Field(..., gt=0)
+    fees_usdt: float = Field(0.0, ge=0)
+    r_multiple: float
+    net_pnl_usdt: float
+    note: str | None = None
+
+
+class TradeJournalSaveResponse(BaseModel):
+    exchange: str
+    data: dict
+
+class TradeStatsItem(BaseModel):
+    outcome: Literal["win", "loss", "breakeven"]
+    r_multiple: float
+    net_pnl_usdt: float
+
+
+class TradeStatsQuery(BaseModel):
+    trades: list[TradeStatsItem] = Field(..., min_length=1)
+
+
+class TradeStatsResponse(BaseModel):
+    total_trades: int
+    win_rate_percent: float
+    loss_rate_percent: float
+    breakeven_rate_percent: float
+    avg_r_multiple: float
+    avg_win_r: float | None
+    avg_loss_r: float | None
+    expectancy_r: float
+    total_net_pnl_usdt: float
+    avg_net_pnl_usdt: float
+
+class TradeJournalPreviewQuery(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    side: str = Field(..., pattern="^(buy|sell)$")
+    entry_price: float = Field(..., gt=0)
+    stop_loss: float = Field(..., gt=0)
+    take_profit: float = Field(..., gt=0)
+    exit_price: float = Field(..., gt=0)
+    position_size_units: float = Field(..., gt=0)
+    fees_usdt: float = Field(0.0, ge=0)
+    note: str | None = None
+
+
+class TradeJournalPreviewResponse(BaseModel):
+    exchange: str
+    data: dict
+
+class PositionExitPlanQuery(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    side: str = Field(..., pattern="^(buy|sell)$")
+    entry_price: float = Field(..., gt=0)
+    current_price: float = Field(..., gt=0)
+    current_stop_loss: float = Field(..., gt=0)
+    position_size_units: float = Field(..., gt=0)
+    partial_close_percent: float = Field(..., gt=0, le=100)
+    breakeven_activation_rr: float = Field(..., gt=0, le=10)
+    risk_per_unit: float = Field(..., gt=0)
+    trailing_activation_percent: float = Field(..., ge=0, le=20)
+    trailing_distance_percent: float = Field(..., gt=0, le=20)
+
+
+class PositionExitPlanResponse(BaseModel):
+    exchange: str
+    data: dict
 
 class BreakevenPreviewQuery(BaseModel):
     symbol: str = Field(..., min_length=1)

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from datetime import datetime, UTC
+from uuid import uuid4
+
 from typing import Any
 
 from core.config import get_settings
@@ -26,6 +31,53 @@ def get_execution_log(limit: int = 100) -> list[dict[str, Any]]:
             if limit <= 0:
                 limit = 1
             return _EXECUTION_LOG[-limit:]
+
+TRADE_JOURNAL_FILE = Path("data/trade_journal.json")
+
+
+def _load_trade_journal_entries(file_path: Path | None = None) -> list[dict]:
+    path = file_path or TRADE_JOURNAL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not path.exists():
+        return []
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_trade_journal_entries(entries: list[dict], file_path: Path | None = None) -> None:
+    path = file_path or TRADE_JOURNAL_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+
+
+async def get_trade_journal_entries():
+    entries = _load_trade_journal_entries()
+    return {
+        "exchange": "BingX",
+        "count": len(entries),
+        "data": entries,
+    }
+
+
+async def get_trade_journal_entry(entry_id: str):
+    entries = _load_trade_journal_entries()
+
+    for entry in entries:
+        if entry.get("id") == entry_id:
+            return {
+                "exchange": "BingX",
+                "data": entry,
+            }
+
+    raise ValueError("Trade journal entry not found")
 
 
 async def fetch_signal(query) -> Any:
@@ -469,6 +521,180 @@ async def build_breakeven_preview(query):
     }
 
 
+async def build_position_exit_plan(query):
+    side = query.side.lower()
+    entry_price = float(query.entry_price)
+    current_price = float(query.current_price)
+    current_stop_loss = float(query.current_stop_loss)
+    position_size_units = float(query.position_size_units)
+    partial_close_percent = float(query.partial_close_percent)
+    breakeven_activation_rr = float(query.breakeven_activation_rr)
+    risk_per_unit = float(query.risk_per_unit)
+    trailing_activation_percent = float(query.trailing_activation_percent)
+    trailing_distance_percent = float(query.trailing_distance_percent)
+
+    if side not in {"buy", "sell"}:
+        raise ValueError("Invalid trade side")
+
+    close_size_units = position_size_units * (partial_close_percent / 100)
+    remaining_size_units = position_size_units - close_size_units
+
+    if side == "buy":
+        breakeven_activation_price = entry_price + (risk_per_unit * breakeven_activation_rr)
+        breakeven_activated = current_price >= breakeven_activation_price
+        breakeven_stop_loss = entry_price
+
+        trailing_activation_price = entry_price * (1 + trailing_activation_percent / 100)
+        trailing_activated = current_price >= trailing_activation_price
+        trailing_stop_loss = current_price * (1 - trailing_distance_percent / 100)
+        trailing_should_update = trailing_stop_loss > current_stop_loss
+    else:
+        breakeven_activation_price = entry_price - (risk_per_unit * breakeven_activation_rr)
+        breakeven_activated = current_price <= breakeven_activation_price
+        breakeven_stop_loss = entry_price
+
+        trailing_activation_price = entry_price * (1 - trailing_activation_percent / 100)
+        trailing_activated = current_price <= trailing_activation_price
+        trailing_stop_loss = current_price * (1 + trailing_distance_percent / 100)
+        trailing_should_update = trailing_stop_loss < current_stop_loss
+
+    return {
+        "exchange": "BingX",
+        "data": {
+            "symbol": query.symbol,
+            "side": side,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "current_stop_loss": current_stop_loss,
+            "position_size_units": round(position_size_units, 6),
+            "partial_close": {
+                "close_percent": partial_close_percent,
+                "close_size_units": round(close_size_units, 6),
+                "remaining_size_units": round(remaining_size_units, 6),
+                "close_notional_usdt": round(close_size_units * current_price, 2),
+            },
+            "breakeven": {
+                "activation_rr": breakeven_activation_rr,
+                "risk_per_unit": risk_per_unit,
+                "activation_price": round(breakeven_activation_price, 4),
+                "activated": breakeven_activated,
+                "proposed_stop_loss": round(breakeven_stop_loss, 4),
+            },
+            "trailing_stop": {
+                "activation_percent": trailing_activation_percent,
+                "distance_percent": trailing_distance_percent,
+                "activation_price": round(trailing_activation_price, 4),
+                "activated": trailing_activated,
+                "proposed_stop_loss": round(trailing_stop_loss, 4),
+                "should_update": trailing_should_update,
+            },
+            "reason": "Combined exit plan generated with partial close, breakeven, and trailing stop logic",
+        },
+    }
+
+
+async def build_trade_journal_preview(query):
+    side = query.side.lower()
+    entry_price = float(query.entry_price)
+    stop_loss = float(query.stop_loss)
+    take_profit = float(query.take_profit)
+    exit_price = float(query.exit_price)
+    position_size_units = float(query.position_size_units)
+    fees_usdt = float(query.fees_usdt)
+
+    if side not in {"buy", "sell"}:
+        raise ValueError("Invalid trade side")
+
+    if side == "buy":
+        risk_per_unit = entry_price - stop_loss
+        reward_per_unit = take_profit - entry_price
+        realized_per_unit = exit_price - entry_price
+    else:
+        risk_per_unit = stop_loss - entry_price
+        reward_per_unit = entry_price - take_profit
+        realized_per_unit = entry_price - exit_price
+
+    if risk_per_unit <= 0:
+        raise ValueError("Invalid risk per unit for journal preview")
+
+    planned_rr = reward_per_unit / risk_per_unit
+    actual_rr = realized_per_unit / risk_per_unit
+    gross_pnl_usdt = realized_per_unit * position_size_units
+    net_pnl_usdt = gross_pnl_usdt - fees_usdt
+
+    if actual_rr > 0:
+        outcome = "win"
+    elif actual_rr < 0:
+        outcome = "loss"
+    else:
+        outcome = "breakeven"
+
+    return {
+        "exchange": "BingX",
+        "data": {
+            "symbol": query.symbol,
+            "side": side,
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "exit_price": exit_price,
+            "position_size_units": round(position_size_units, 6),
+            "fees_usdt": round(fees_usdt, 2),
+            "risk_per_unit": round(risk_per_unit, 4),
+            "reward_per_unit": round(reward_per_unit, 4),
+            "realized_per_unit": round(realized_per_unit, 4),
+            "planned_rr": round(planned_rr, 4),
+            "actual_rr": round(actual_rr, 4),
+            "r_multiple": round(actual_rr, 4),
+            "gross_pnl_usdt": round(gross_pnl_usdt, 2),
+            "net_pnl_usdt": round(net_pnl_usdt, 2),
+            "outcome": outcome,
+            "note": query.note,
+            "reason": "Trade journal preview calculated from planned trade levels and actual exit",
+        },
+    }
+
+async def build_trade_stats(query):
+    trades = query.trades
+    total = len(trades)
+
+    wins = [t for t in trades if t.outcome == "win"]
+    losses = [t for t in trades if t.outcome == "loss"]
+    breakevens = [t for t in trades if t.outcome == "breakeven"]
+
+    win_count = len(wins)
+    loss_count = len(losses)
+    breakeven_count = len(breakevens)
+
+    win_rate = win_count / total
+    loss_rate = loss_count / total
+    breakeven_rate = breakeven_count / total
+
+    avg_win_r = sum(t.r_multiple for t in wins) / win_count if wins else None
+    avg_loss_r = sum(t.r_multiple for t in losses) / loss_count if losses else None
+    avg_r_multiple = sum(t.r_multiple for t in trades) / total
+
+    if avg_win_r is not None and avg_loss_r is not None:
+        expectancy_r = (win_rate * avg_win_r) - (loss_rate * avg_loss_r)
+    else:
+        expectancy_r = avg_r_multiple
+
+    total_net_pnl_usdt = sum(t.net_pnl_usdt for t in trades)
+    avg_net_pnl_usdt = total_net_pnl_usdt / total
+
+    return {
+        "total_trades": total,
+        "win_rate_percent": round(win_rate * 100, 2),
+        "loss_rate_percent": round(loss_rate * 100, 2),
+        "breakeven_rate_percent": round(breakeven_rate * 100, 2),
+        "avg_r_multiple": round(avg_r_multiple, 4),
+        "avg_win_r": round(avg_win_r, 4) if avg_win_r is not None else None,
+        "avg_loss_r": round(avg_loss_r, 4) if avg_loss_r is not None else None,
+        "expectancy_r": round(expectancy_r, 4),
+        "total_net_pnl_usdt": round(total_net_pnl_usdt, 2),
+        "avg_net_pnl_usdt": round(avg_net_pnl_usdt, 2),
+    }
+
 
 async def build_trailing_stop_preview(query):
     side = query.side.lower()
@@ -542,6 +768,38 @@ async def build_partial_close_preview(query):
             "remaining_notional_usdt": round(remaining_notional_usdt, 2),
             "reason": "Partial close preview calculated from current position size and requested close percentage",
         },
+    }
+
+async def save_trade_journal_entry(query):
+    side = query.side.lower()
+
+    if side not in {"buy", "sell"}:
+        raise ValueError("Invalid trade side")
+
+    entry = {
+        "id": str(uuid4()),
+        "symbol": query.symbol,
+        "side": side,
+        "outcome": query.outcome,
+        "entry_price": float(query.entry_price),
+        "stop_loss": float(query.stop_loss),
+        "take_profit": float(query.take_profit),
+        "exit_price": float(query.exit_price),
+        "position_size_units": float(query.position_size_units),
+        "fees_usdt": float(query.fees_usdt),
+        "r_multiple": float(query.r_multiple),
+        "net_pnl_usdt": float(query.net_pnl_usdt),
+        "note": query.note,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
+    entries = _load_trade_journal_entries()
+    entries.append(entry)
+    _save_trade_journal_entries(entries)
+
+    return {
+        "exchange": "BingX",
+        "data": entry,
     }
 
 

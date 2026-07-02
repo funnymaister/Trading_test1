@@ -25,6 +25,16 @@ from schemas.trade import (
     PartialClosePreviewResponse,
     BreakevenPreviewQuery,
     BreakevenPreviewResponse,
+    PositionExitPlanQuery,
+    PositionExitPlanResponse,
+    TradeJournalPreviewQuery,
+    TradeJournalPreviewResponse,
+    TradeStatsQuery,
+    TradeStatsResponse,
+    TradeJournalSaveQuery,
+    TradeJournalSaveResponse,
+    TradeJournalEntryResponse,
+    TradeJournalListResponse,
 )
 
 from services.trade_service import (
@@ -39,6 +49,12 @@ from services.trade_service import (
     build_trailing_stop_preview,
     build_partial_close_preview,
     build_breakeven_preview,
+    build_position_exit_plan,
+    build_trade_journal_preview,
+    build_trade_stats,
+    save_trade_journal_entry,
+    get_trade_journal_entries,
+    get_trade_journal_entry,
 )
 
 
@@ -46,6 +62,44 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/trade", tags=["trade"])
 
+
+@router.get("/journal", response_model=TradeJournalListResponse)
+async def trade_journal():
+    return await get_trade_journal_entries()
+
+
+@router.get("/journal/{entry_id}", response_model=TradeJournalEntryResponse)
+async def trade_journal_entry(entry_id: str):
+    try:
+        return await get_trade_journal_entry(entry_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+@router.post("/journal-save", response_model=TradeJournalSaveResponse)
+async def trade_journal_save(query: TradeJournalSaveQuery):
+    try:
+        return await save_trade_journal_entry(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+@router.post("/stats", response_model=TradeStatsResponse)
+async def trade_stats(query: TradeStatsQuery):
+    return await build_trade_stats(query)
+
+@router.post("/journal-preview", response_model=TradeJournalPreviewResponse)
+async def trade_journal_preview(query: TradeJournalPreviewQuery):
+    try:
+        return await build_trade_journal_preview(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/position-exit-plan", response_model=PositionExitPlanResponse)
+async def position_exit_plan(query: PositionExitPlanQuery):
+    try:
+        return await build_position_exit_plan(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @router.post("/breakeven/preview", response_model=BreakevenPreviewResponse)
 async def breakeven_preview(query: BreakevenPreviewQuery):
